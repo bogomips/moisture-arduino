@@ -22,25 +22,65 @@ Timer<25> timer;
 
               //A0  A1   A2   A3   A4   A5 
 static const uint8_t analog_pins[] = {A0, A1, A2, A3, A4, A5};
-int air[]   = { 663, 670, 775, 777, 776, 703 };
-int water[] = { 356, 359, 466, 477, 466, 426 };
+int air[]   = { 653, 668, 664, 665, 585, 585 };
+int water[] = { 344, 355, 355, 364, 317, 317 };
 int moist_water_trigger[] = { 40, 40, 40, 40, 40, 40 };
 int moist_water_stop[] = { 65, 65, 65, 65, 65, 65 };
 int watering_time[] = { 2, 2, 7, 7, 7, 7 };
-int pump_pins[] = { 4, 5, 6, 7 };
+//int pump_pins[] = { 4, 5, 6, 7 };
 
 bool grass_triggered[] = {false, false, false, false, false, false};
 int latest_moisture_perc[] = { 0,0,0,0,0,0 };
 bool sensors_reading_disabled=false; //while the pump is on the interference falses the values
 
 // this is a workaround for some sensors
-int ground_pin = 8;
+//int ground_pin = 8;
+
+// shift register
+int clockPin = 4 ; //blue
+int dataPin  = 7; //yellow
+int latchPin  = 8; //violet
+
+int relay_on = LOW;
+int relay_off = HIGH;
+int relaysRegister[] = { relay_off, relay_off, relay_off, relay_off, relay_off, relay_off, relay_off, relay_off };
+
+
+
+void updateShiftRegister() {
+
+  // I am not using this because it works with byte while I prefer an array here
+  /*byte test = 0;
+  digitalWrite(latchPin, LOW);
+  shiftOut(dataPin, clockPin, LSBFIRST, test); 
+  digitalWrite(latchPin, HIGH);*/
+
+  //digitalWrite(clockPin,LOW);
+  digitalWrite(latchPin,LOW);
+
+  for (int i = 0; i < 8; i++) {
+    digitalWrite(clockPin,LOW);
+    digitalWrite(dataPin,relaysRegister[i]);
+    digitalWrite(clockPin,HIGH);
+  }
+
+  digitalWrite(latchPin,HIGH);
+  
+}
 
 bool stop_pump(void *pump_index) {
   //Serial.print("closing=");Serial.println((int)pump_index);
-  digitalWrite(pump_pins[(int)pump_index], LOW); 
+  //digitalWrite(pump_pins[(int)pump_index], relay_off); 
+  relaysRegister[(int)pump_index] = relay_off;
+  updateShiftRegister();
   sensors_reading_disabled=false;
   return true;   
+}
+
+bool start_pump(void *pump_index) {
+  sensors_reading_disabled=true;
+  relaysRegister[(int)pump_index] = relay_on;
+  updateShiftRegister();
 }
 
 bool water_manager(void *) {
@@ -54,13 +94,11 @@ bool water_manager(void *) {
    
     if ( (latest_moisture_perc[i] < moist_water_trigger[i]) && !grass_triggered[i])  { 
       grass_triggered[i]=true;
-      sensors_reading_disabled=true;
-      digitalWrite(pump_pins[i], HIGH);
+      start_pump(i);
       timer.in(watering_time[i]*1000, stop_pump , (void *)i);
     }
     else if ( ( latest_moisture_perc[i] <= moist_water_stop[i] ) && grass_triggered[i] ) {  
-      sensors_reading_disabled=true;
-      digitalWrite(pump_pins[i], HIGH);
+      start_pump(i);
       timer.in(watering_time[i]*1000, stop_pump, (void *)i);
     }
     else if ( ( latest_moisture_perc[i] >= moist_water_stop[i] ) && grass_triggered[i] ) {  
@@ -102,7 +140,7 @@ bool read_values(void *) {
   return true;
 }
 
-bool sensors_reset(void *) {
+/*bool sensors_reset(void *) {
 
   //reset
   digitalWrite(ground_pin, HIGH);
@@ -114,21 +152,14 @@ bool sensors_reset(void *) {
 
   return true;
   
-}
+}*/
 
 void pin_setup() {
    
-  pinMode(ground_pin, OUTPUT); 
-
-  for (int i = 0; i < 4; i++) { 
-    pinMode(pump_pins[i], OUTPUT); 
-    digitalWrite(pump_pins[i], HIGH);
-    delay(500);
-    digitalWrite(pump_pins[i], LOW);
-    delay(500);
-    
-  }
- 
+  //pinMode(ground_pin, OUTPUT);
+  pinMode(clockPin, OUTPUT); 
+  pinMode(dataPin, OUTPUT); 
+  pinMode(latchPin, OUTPUT); 
 
 }
 
@@ -138,15 +169,28 @@ void setup() {
   //mySerial.begin(115200);
 
   pin_setup();
-  sensors_reset(NULL); 
+  //sensors_reset(NULL); 
 
-  timer.every(30000, sensors_reset);
+  for (int i = 0; i < 8; i++ ) { 
+    relaysRegister[i] = relay_on;
+    updateShiftRegister();
+    delay(500);
+    relaysRegister[i] = relay_off;
+    updateShiftRegister();
+    
+  }
+
+
+ //timer.every(30000, sensors_reset);
+  timer.every(30000, read_values);
   timer.every(35000, water_manager);
+
   
 }
 
 void loop() {
 
   timer.tick();
+
   
 }
