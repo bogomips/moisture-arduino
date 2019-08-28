@@ -20,16 +20,25 @@ JsonObject sensor_5 = sensors.createNestedObject();
 Timer<25> timer;
 
               //A0  A1   A2   A3   A4   A5 
-static const uint8_t analog_pins[] = {A0, A1, A2, A3, A4, A5};
-int air[]   = { 653, 668, 664, 665, 585, 585 };
-int water[] = { 344, 355, 355, 364, 317, 317 };
-int moist_water_trigger[] = { 40, 40, 40, 40, 40, 40 };
-int moist_water_stop[] = { 65, 65, 65, 65, 65, 65 };
-int watering_time[] = { 2, 2, 7, 7, 7, 7 };
+static const uint8_t analog_pins[] = { A0, A1, A2, A3, A4, A5 };
+int active_grasses = 6; //sizeof(analog_pins) / sizeof(uint8_t);
+//int air[]   = { 653, 668, 664, 665, 585, 585 };
+//int water[] = { 344, 355, 355, 364, 317, 317 }; here i've used the last as the first
+int air[]   = { 590, 668, 664, 665, 585, 585 };
+int water[] = { 317, 355, 355, 364, 317, 317 };
+int moist_water_trigger[] = { 40, 40, 40, 40, 40, 40, 40, 40 };
+int moist_water_stop[] = { 65, 65, 65, 65, 65, 65, 65, 65 };
+int watering_time[] = { 5, 5, 5, 5, 5, 5, 5, 5 };
+int waiting_sensors_time[] = { 3, 3, 3, 3, 3, 3, 3, 3 }; //skipping cycle
 
-bool grass_triggered[] = {false, false, false, false, false, false};
-int latest_moisture_perc[] = { 0,0,0,0,0,0 };
+int grass_triggered[] = { 0, 0, 0, 0, 0, 0, 0, 0};
+int sensors_waiting[] = { 0, 0, 0, 0, 0, 0, 0, 0};
+int grass_trigger_limit = 1; //test value, fix it
+int latest_moisture_perc[] = { 0, 0, 0, 0, 0, 0, 0, 0 };
 bool sensors_reading_disabled=false; //while the pump is on the interference falses the values
+
+double water_manager_timer = 35000;
+int read_sensors_timer  = 30000;
 
 //this is a workaround for some sensors
 //int ground_pin = 8;
@@ -37,7 +46,7 @@ bool sensors_reading_disabled=false; //while the pump is on the interference fal
 // shift register
 int clockPin = 4 ; //blue
 int dataPin  = 7; //yellow
-int latchPin  = 8; //violet
+int latchPin = 8; //violet
 
 //The relay modules works with an inverted logic
 int relay_on = LOW;
@@ -82,20 +91,51 @@ bool start_pump(void *pump_index) {
 
 bool water_manager(void *) {
   
-  for (int i = 0; i < 6; i++) { 
+  for (int i = 0; i < active_grasses; i++) { 
     // If I add some serial.print here it basically breaks the code and I have no clue why
    
-    if ( (latest_moisture_perc[i] < moist_water_trigger[i]) && !grass_triggered[i])  { 
-      grass_triggered[i]=true;
+    if ( (latest_moisture_perc[i] < moist_water_trigger[i]) && (grass_triggered[i] == 0) ) { 
+
+      // Water one grass at the time
+      //if (sensors_reading_disabled)
+      //  break;
+
+      grass_triggered[i]=1;
       start_pump(i);
       timer.in(watering_time[i]*1000, stop_pump , (void *)i);
+
     }
-    else if ( ( latest_moisture_perc[i] <= moist_water_stop[i] ) && grass_triggered[i] ) {  
-      start_pump(i);
-      timer.in(watering_time[i]*1000, stop_pump, (void *)i);
+    else if ( ( latest_moisture_perc[i] <= moist_water_stop[i] ) && grass_triggered[i] > 0 ) {  
+
+      grass_triggered[i]++;
+
+      //protection
+      /*if (grass_triggered >= grass_trigger_limit) {
+
+        grass_triggered[i]=0;
+        break;
+
+      }*/
+
+      /***
+       * Some sensors are very slow, I want to give the enough time by skipping waiting_sensors_time[i] loops.
+       * Total time is waiting_sensors_time[i]* water_manager_time
+      */
+
+      if (sensors_waiting[i] >= waiting_sensors_time[i]) {
+
+        sensors_waiting[i]=0;
+        start_pump(i);
+        timer.in(watering_time[i]*1000, stop_pump, (void *)i);
+
+      }
+      else {
+        sensors_waiting[i]++;
+      }
+
     }
-    else if ( ( latest_moisture_perc[i] >= moist_water_stop[i] ) && grass_triggered[i] ) {  
-      grass_triggered[i]=false;
+    else if ( ( latest_moisture_perc[i] >= moist_water_stop[i] ) && grass_triggered[i] > 0 ) {  
+      grass_triggered[i]=0;
     }
 
   }
@@ -103,13 +143,13 @@ bool water_manager(void *) {
   return true;
 }
 
-bool read_values(void *) {
+bool read_sensors(void *) {
 
   //char jsonOutput[500];
   if (sensors_reading_disabled)
     return true;
     
-  for (int i = 0; i < 6; i++) { 
+  for (int i = 0; i < active_grasses; i++) { 
 
     int moisture_raw = analogRead(analog_pins[i]);
     int moisture_percentage = map(moisture_raw,air[i],water[i],0,100);
@@ -141,7 +181,7 @@ bool read_values(void *) {
   digitalWrite(ground_pin, LOW);
   //delay(10000);
 
-  timer.in(1000, read_values);
+  timer.in(1000, read_sensors);
 
   return true;
   
@@ -174,8 +214,8 @@ void setup() {
   }
 
  //timer.every(30000, sensors_reset);
-  timer.every(30000, read_values);
-  timer.every(35000, water_manager);
+  timer.every(read_sensors_timer, read_sensors);
+  timer.every(water_manager_timer, water_manager);
 
 }
 
