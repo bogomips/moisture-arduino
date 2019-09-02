@@ -28,12 +28,14 @@ int air[]   = { 590, 668, 664, 665, 585, 585 };
 int water[] = { 317, 355, 355, 364, 317, 317 };
 int moist_water_trigger[] = { 40, 40, 40, 40, 40, 40, 40, 40 };
 int moist_water_stop[] = { 65, 65, 65, 65, 65, 65, 65, 65 };
-int watering_time[] = { 5, 5, 5, 5, 5, 5, 5, 5 };
+int watering_time[] = { 6, 6, 5, 5, 5, 5, 5, 5 };
 int waiting_sensors_time[] = { 3, 3, 3, 3, 3, 3, 3, 3 }; //skipping cycle
+int max_cycles[] = { 20, 20, 20, 20, 20, 20, 20, 20 }; //skipping cycle
+int cycles_break[] = { 20000, 20000, 20000, 20000, 20000, 20000, 20000, 20000 }; //skipping cycle
 
 int grass_triggered[] = { 0, 0, 0, 0, 0, 0, 0, 0};
 int sensors_waiting[] = { 0, 0, 0, 0, 0, 0, 0, 0};
-int grass_trigger_limit = 1; //test value, fix it
+//int grass_trigger_limit = 1; //test value, fix it
 int latest_moisture_perc[] = { 0, 0, 0, 0, 0, 0, 0, 0 };
 bool sensors_reading_disabled=false; //while the pump is on the interference falses the values
 
@@ -87,6 +89,14 @@ bool start_pump(void *pump_index) {
   relaysRegister[(int)pump_index] = relay_on;
   updateShiftRegister();
 
+  return true;
+
+}
+
+bool reset_grass_triggered(void *pump_index) {
+
+  grass_triggered[(int)pump_index]=0;
+  return true;
 }
 
 bool water_manager(void *) {
@@ -110,19 +120,19 @@ bool water_manager(void *) {
       grass_triggered[i]++;
 
       //protection
-      /*if (grass_triggered >= grass_trigger_limit) {
+      if (grass_triggered >= max_cycles[i]) {
 
-        grass_triggered[i]=0;
-        break;
-
-      }*/
+        //grass_triggered[i]=0;
+        //break;
+        timer.in(cycles_break[i]*1000, reset_grass_triggered , (void *)i);
+      }
 
       /***
        * Some sensors are very slow, I want to give the enough time by skipping waiting_sensors_time[i] loops.
        * Total time is waiting_sensors_time[i]* water_manager_time
       */
 
-      if (sensors_waiting[i] >= waiting_sensors_time[i]) {
+      else if ((sensors_waiting[i] >= waiting_sensors_time[i]) && (grass_triggered < max_cycles[i])) {
 
         sensors_waiting[i]=0;
         start_pump(i);
@@ -207,7 +217,7 @@ void setup() {
   for (int i = 0; i < 8; i++ ) { 
     relaysRegister[i] = relay_on;
     updateShiftRegister();
-    delay(500);
+    delay(300);
     relaysRegister[i] = relay_off;
     updateShiftRegister();
     
